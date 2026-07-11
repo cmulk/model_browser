@@ -45,4 +45,12 @@ fn main() {
             panic!("Failed to download OrbitControls.js via curl");
         }
     }
+
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        println!("cargo:rerun-if-changed=assets/icon.ico");
+        winresource::WindowsResource::new()
+            .set_icon("assets/icon.ico")
+            .compile()
+            .expect("Failed to embed Windows icon resource");
+    }
 }
