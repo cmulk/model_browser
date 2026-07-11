@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Browser — 3D Print Library</title>
+    <meta name="description" content="Browse and preview 3D printable animal models (.3mf and .stl files) with an interactive 3D viewer.">
+    <link rel="stylesheet" href="/style.css">
+    <script type="importmap">{"imports":{"three":"/vendor/three.module.js","three/addons/controls/OrbitControls.js":"/vendor/OrbitControls.js"}}</script>
+</head>
+<body>
+    <div class="bg-blob blob-1" aria-hidden="true"></div>
+    <div class="bg-blob blob-2" aria-hidden="true"></div>
+    <div class="bg-blob blob-3" aria-hidden="true"></div>
+
+    <header class="app-header glass" id="app-header">
+        <div class="header-left">
+            <span class="header-icon" aria-hidden="true">✦</span>
+            <h1 class="header-title">Model Browser</h1>
+        </div>
+        <div class="header-right">
+            <div class="search-container" id="search-container">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" id="search-input" class="search-input" placeholder="Search models..." autocomplete="off" aria-label="Search models">
+            </div>
+        </div>
+    </header>
+
+    <main class="app-main" id="app-main">
+        <aside class="tree-panel glass" id="tree-panel">
+            <div class="tree-scroll" id="tree-scroll">
+                <div class="tree-loading" id="tree-loading">Loading library…</div>
+            </div>
+        </aside>
+
+        <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" tabindex="0"></div>
+
+        <section class="preview-panel glass" id="preview-panel">
+            <div class="preview-empty" id="preview-empty">
+                <div class="preview-empty-icon" aria-hidden="true">
+                    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                        <path d="M32 8L56 20V44L32 56L8 44V20L32 8Z"/>
+                        <path d="M32 8V32M32 32L56 20M32 32L8 20M32 32V56"/>
+                    </svg>
+                </div>
+                <p class="preview-empty-text">Select a model to preview</p>
+            </div>
+
+            <div class="preview-content" id="preview-content" style="display:none;">
+                <div class="preview-viewport" id="preview-viewport">
+                    <canvas id="preview-canvas"></canvas>
+                    <img id="preview-image" style="display:none;" alt="Model preview image">
+                    <img id="preview-thumbnail" style="display:none;" alt="3MF thumbnail">
+                </div>
+
+                <div class="preview-progress" id="preview-progress" style="display:none;">
+                    <div class="progress-track glass">
+                        <div class="progress-bar" id="progress-bar"></div>
+                    </div>
+                    <span class="progress-text" id="progress-text">Loading…</span>
+                </div>
+
+                <div class="preview-info" id="preview-info">
+                    <div class="info-row">
+                        <span class="info-filename" id="info-filename"></span>
+                        <span class="info-size" id="info-size"></span>
+                    </div>
+                    <div class="info-stats" id="info-stats"></div>
+                    <div class="info-actions">
+                        <button class="btn glass" id="btn-download" title="Download file">
+                            <span aria-hidden="true">⬇</span> Download
+                        </button>
+                        <button class="btn glass" id="btn-thumbnail" title="Toggle thumbnail" style="display:none;">
+                            <span aria-hidden="true">🖼</span> Thumbnail
+                        </button>
+                        <button class="btn glass" id="btn-reset" title="Reset camera view">
+                            <span aria-hidden="true">⟲</span> Reset
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script type="module" src="/app.js"></script>
+</body>
+</html>
