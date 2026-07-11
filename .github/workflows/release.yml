@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Compute version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.calver.outputs.version }}
+    steps:
+      - name: Compute CalVer tag
+        id: calver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base=$(date -u +%Y.%m.%d)
+          version="$base"
+          n=1
+          while gh release view "v$version" --repo "${{ github.repository }}" >/dev/null 2>&1; do
+            version="${base}.${n}"
+            n=$((n + 1))
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  linux-build:
+    name: Build Linux binary
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v4
+      - run: just release
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/release/model-browser dist/model-browser-linux-x86_64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-binary
+          path: dist/model-browser-linux-x86_64
+
+  windows-build:
+    name: Build Windows binary
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v4
+      - name: Install mingw-w64
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
+      - run: just windows
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/x86_64-pc-windows-gnu/release/model-browser.exe dist/model-browser-windows-x86_64.exe
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-binary
+          path: dist/model-browser-windows-x86_64.exe
+
+  release:
+    name: Create release
+    needs: [version, linux-build, windows-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-binary
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-binary
+          path: dist
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: v${{ needs.version.outputs.version }}
+          files: |
+            dist/model-browser-linux-x86_64
+            dist/model-browser-windows-x86_64.exe
