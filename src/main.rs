@@ -5,7 +5,7 @@ mod tree;
 
 use axum::{
     Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
@@ -119,6 +119,8 @@ async fn main() {
         .route("/api/thumbnail", get(api_thumbnail))
         .route("/api/image", get(api_image))
         .route("/api/download", get(api_download))
+        .route("/api/file/{*path}", get(api_file))
+        .route("/api/stl-as-3mf/{*path}", get(api_stl_as_3mf))
         // Static frontend (catch-all)
         .fallback(get(serve_frontend))
         .with_state(state)
@@ -396,8 +398,92 @@ async fn api_download(
     State(state): State<Arc<AppState>>,
     Query(query): Query<PathQuery>,
 ) -> Response {
-    let validated = match paths::validate_path(&state.root, &query.path, paths::DOWNLOAD_EXTENSIONS)
-    {
+    serve_download(&state, &query.path).await
+}
+
+/// Same as `/api/download`, but with the relative path in the URL itself so the
+/// URL ends with the real filename. Bambu Studio's `bambustudio://open?file=`
+/// handler infers the file type from the URL path (ignoring
+/// `Content-Disposition`), so it needs this form to open downloads.
+async fn api_file(State(state): State<Arc<AppState>>, Path(path): Path<String>) -> Response {
+    serve_download(&state, &path).await
+}
+
+/// Serve an STL file converted on the fly into a minimal 3MF. The URL form is
+/// `/api/stl-as-3mf/<relative stl path>.3mf` — the frontend appends `.3mf` because
+/// Bambu Studio's `bambustudio://open?file=` handler refuses any downloaded file
+/// whose URL doesn't end in `.3mf` (it can't open STL downloads at all, see
+/// bambulab/BambuStudio#11422).
+async fn api_stl_as_3mf(State(state): State<Arc<AppState>>, Path(path): Path<String>) -> Response {
+    let Some(stl_path) = path.strip_suffix(".3mf") else {
+        return paths::PathError::NotFound.into_response();
+    };
+
+    let validated = match paths::validate_path(&state.root, stl_path, &["stl"]) {
+        Ok(p) => p,
+        Err(e) => return e.into_response(),
+    };
+
+    let filename = format!(
+        "{}.3mf",
+        validated
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("model.stl")
+    );
+
+    let result = tokio::task::spawn_blocking(move || {
+        let mesh = mesh::read_stl_file(&validated)?;
+        threemf::write_3mf(&mesh)
+    })
+    .await;
+
+    let data = match result {
+        Ok(Ok(data)) => data,
+        Ok(Err(e)) => {
+            let body = serde_json::to_string(
+                &serde_json::json!({"error": format!("Failed to convert STL: {}", e)}),
+            )
+            .unwrap_or_default();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                )],
+                body,
+            )
+                .into_response();
+        }
+        Err(e) => {
+            let body =
+                serde_json::to_string(&serde_json::json!({"error": format!("Task failed: {}", e)}))
+                    .unwrap_or_default();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                )],
+                body,
+            )
+                .into_response();
+        }
+    };
+
+    let disposition = format!("attachment; filename=\"{}\"", filename);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "model/3mf")
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .header(header::CONTENT_LENGTH, data.len().to_string())
+        .header(header::CACHE_CONTROL, "no-cache")
+        .body(axum::body::Body::from(data))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+async fn serve_download(state: &AppState, raw_path: &str) -> Response {
+    let validated = match paths::validate_path(&state.root, raw_path, paths::DOWNLOAD_EXTENSIONS) {
         Ok(p) => p,
         Err(e) => return e.into_response(),
     };

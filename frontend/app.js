@@ -29,6 +29,7 @@ const infoFilename = document.getElementById('info-filename');
 const infoSize = document.getElementById('info-size');
 const infoStats = document.getElementById('info-stats');
 const btnDownload = document.getElementById('btn-download');
+const btnBambu = document.getElementById('btn-bambu');
 const btnThumbnail = document.getElementById('btn-thumbnail');
 const btnReset = document.getElementById('btn-reset');
 const splitter = document.getElementById('splitter');
@@ -282,6 +283,9 @@ function selectFile(el) {
 
     // Show/hide thumbnail button
     btnThumbnail.style.display = kind === '3mf' ? 'inline-flex' : 'none';
+
+    // Bambu Studio can only open model files, not images
+    btnBambu.style.display = kind === '3mf' || kind === 'stl' ? 'inline-flex' : 'none';
 
     if (kind === '3mf' || kind === 'stl') {
         loadMesh(path);
@@ -600,6 +604,20 @@ btnDownload.addEventListener('click', () => {
     a.href = '/api/download?path=' + encodeURIComponent(currentFilePath);
     a.download = '';
     a.click();
+});
+
+btnBambu.addEventListener('click', () => {
+    if (!currentFilePath) return;
+    // Bambu Studio's URL scheme downloads the file itself, so hand it this
+    // server's download URL (same machine, so localhost resolves for it too).
+    // Its handler infers the type from the URL path AND only accepts .3mf
+    // downloads (bambulab/BambuStudio#11422), so 3MFs get the direct /api/file/
+    // URL while STLs go through the on-the-fly converter with ".3mf" appended.
+    const encoded = currentFilePath.split('/').map(encodeURIComponent).join('/');
+    const fileUrl = window.location.origin + (/\.stl$/i.test(currentFilePath)
+        ? '/api/stl-as-3mf/' + encoded + '.3mf'
+        : '/api/file/' + encoded);
+    window.location.href = 'bambustudio://open?file=' + encodeURIComponent(fileUrl);
 });
 
 btnThumbnail.addEventListener('click', toggleThumbnail);

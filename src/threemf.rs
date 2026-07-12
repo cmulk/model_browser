@@ -710,6 +710,72 @@ fn read_zip_entry(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> i
     Ok(data)
 }
 
+/// Serialize a mesh into a minimal single-object 3MF package (zip bytes).
+///
+/// Used to hand STL files to Bambu Studio: its `bambustudio://open?file=` handler
+/// only accepts `.3mf` downloads, so STLs are converted on the fly.
+pub fn write_3mf(mesh: &Mesh) -> io::Result<Vec<u8>> {
+    use std::fmt::Write as _;
+    use std::io::Write as _;
+
+    const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+ <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+ <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+</Types>"#;
+
+    const RELS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+</Relationships>"#;
+
+    // ~40 bytes per vertex/triangle line is a decent estimate; avoids repeated growth.
+    let mut model = String::with_capacity(
+        512 + (mesh.positions.len() / 3) * 40 + (mesh.indices.len() / 3) * 40,
+    );
+    model.push_str(concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+        "<model unit=\"millimeter\" xml:lang=\"en-US\" ",
+        "xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">\n",
+        "<resources>\n<object id=\"1\" type=\"model\">\n<mesh>\n<vertices>\n"
+    ));
+    for v in mesh.positions.chunks_exact(3) {
+        let _ = writeln!(
+            model,
+            "<vertex x=\"{}\" y=\"{}\" z=\"{}\"/>",
+            v[0], v[1], v[2]
+        );
+    }
+    model.push_str("</vertices>\n<triangles>\n");
+    for t in mesh.indices.chunks_exact(3) {
+        let _ = writeln!(
+            model,
+            "<triangle v1=\"{}\" v2=\"{}\" v3=\"{}\"/>",
+            t[0], t[1], t[2]
+        );
+    }
+    model.push_str(concat!(
+        "</triangles>\n</mesh>\n</object>\n</resources>\n",
+        "<build>\n<item objectid=\"1\"/>\n</build>\n</model>\n"
+    ));
+
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    for (name, data) in [
+        ("[Content_Types].xml", CONTENT_TYPES.as_bytes()),
+        ("_rels/.rels", RELS.as_bytes()),
+        ("3D/3dmodel.model", model.as_bytes()),
+    ] {
+        writer.start_file(name, opts).map_err(io::Error::other)?;
+        writer.write_all(data)?;
+    }
+
+    let cursor = writer.finish().map_err(io::Error::other)?;
+    Ok(cursor.into_inner())
+}
+
 /// Extract the thumbnail PNG from a .3mf file.
 ///
 /// Tries in order: Metadata/plate_1.png, Metadata/plate_1_small.png, Metadata/top_1.png
@@ -838,6 +904,33 @@ mod tests {
         assert!((mesh.positions[3] - 1.5).abs() < 1e-6);
         assert_eq!(mesh.positions[4], 0.0);
         assert!((mesh.positions[5] - 300.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_write_3mf_roundtrip() {
+        // One triangle in, write as 3MF, read back through the full 3MF parser.
+        let mut src = Mesh {
+            positions: vec![0.0, 0.0, 0.0, 10.5, 0.0, 0.0, 0.0, 7.25, 0.0],
+            indices: vec![0, 1, 2],
+            colors: Vec::new(),
+        };
+        src.fill_color(mesh::DEFAULT_COLOR);
+
+        let bytes = write_3mf(&src).unwrap();
+
+        let dir = std::env::temp_dir().join("model_browser_test_write3mf");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("roundtrip.3mf");
+        std::fs::write(&path, &bytes).unwrap();
+        let parsed = read_3mf_file(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(parsed.vertex_count(), 3);
+        assert_eq!(parsed.triangle_count(), 1);
+        assert_eq!(parsed.indices, src.indices);
+        for (a, b) in parsed.positions.iter().zip(src.positions.iter()) {
+            assert!((a - b).abs() < 1e-6);
+        }
     }
 
     #[test]
